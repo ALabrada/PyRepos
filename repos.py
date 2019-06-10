@@ -24,8 +24,9 @@ class GithubCrawler:
 
             with graph_lock:
                 print('Analyzing repo {0}...'.format(repo.full_name))
-                language = '?' if repo.language is None else repo.language
-                g.add_node(repo_id, bipartite=0, language=language)
+                language = repo.language or '?'
+                downloads = repo.downloads or 0
+                g.add_node(repo_id, bipartite=0, language=language, downloads=downloads)
                 if repo.fork and repo.parent is not None:
                     #g.add_edge(repo_id, repo.parent.full_name)
                     pass
@@ -74,17 +75,29 @@ class GithubCrawler:
         return g
 
 
-def analize_graph(g):
-    repos = {n for n, d in g.nodes(data=True) if d['bipartite'] == 0}
+def analize_graph(g, limit=1):
+    nodes = g.nodes(data=True)
+    repos = {n for n, d in nodes if d['bipartite'] == 0}
     print('Repositories: {0}'.format(len(repos)))
     users = set(g) - repos
     print('Users: {0}'.format(len(users)))
     print('Connected components: {0}'.format(sum(1 for _ in nx.connected_components(g))))
+    popular_repos = sorted(repos, key=lambda n: -g.degree[n])
+    print('Most popular projects: {0}'.format({n: g.degree[n] for n in popular_repos[0:limit]}))
+    deg1_repos = [n for n in repos if g.degree[n] <= 1]
+    print('Number of risked projects: {0}'.format(len(deg1_repos)))
+    deg1_repos = sorted(deg1_repos, key=lambda n: -nodes[n].get('downloads', 0))
+    print('Most risked projects: {0}'.format(deg1_repos[0:limit]))
+    active_users = sorted(users, key=lambda u: -g.degree[u])
+    print('Most active users: {0}'.format({u: g.degree[u] for u in active_users[0:limit]}))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
+    parser.add_argument('-c', '--continue', dest='scan', action='store_true',
+                        help='Include more repositories from the search results. '
+                             'It is ignored if there is no input graph.')
     parser.add_argument('-s', '--source', default='GitHub', choices=['GitHub', 'GitLab'],
                         help='The type of repository.')
     parser.add_argument('-u', '--user', help='The user name to use for login. '
@@ -101,7 +114,8 @@ if __name__ == "__main__":
     #os.environ['https_proxy'] = "http://192.168.43.176:8020"
     c = GithubCrawler(args.user, args.password)
     g = None if args.input is None else nx.read_gexf(args.input)
-    g = c.find(args.query, limit=args.limit, since=args.date, previous=g)
+    if nx.number_of_nodes(g) == 0 or args.scan:
+        g = c.find(args.query, limit=args.limit, since=args.date, previous=g)
     analize_graph(g)
     if args.output:
         nx.write_gexf(g, args.output)
