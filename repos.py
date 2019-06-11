@@ -1,4 +1,5 @@
 import networkx as nx
+import itertools
 import concurrent.futures
 from threading import Lock
 from github import Github, GithubException, RateLimitExceededException, NamedUser, Repository, Commit
@@ -75,21 +76,47 @@ class GithubCrawler:
         return g
 
 
-def analize_graph(g, limit=1):
+def analize_graph(g, limit=3):
     nodes = g.nodes(data=True)
     repos = {n for n, d in nodes if d['bipartite'] == 0}
     print('Repositories: {0}'.format(len(repos)))
     users = set(g) - repos
     print('Users: {0}'.format(len(users)))
-    print('Connected components: {0}'.format(sum(1 for _ in nx.connected_components(g))))
-    popular_repos = sorted(repos, key=lambda n: -g.degree[n])
-    print('Most popular projects: {0}'.format({n: g.degree[n] for n in popular_repos[0:limit]}))
+    print('Connected components: \n{0}'.format(sum(1 for _ in nx.connected_components(g))))
+
     deg1_repos = [n for n in repos if g.degree[n] <= 1]
-    print('Number of risked projects: {0}'.format(len(deg1_repos)))
+    print('Number of risked projects: \n{0}'.format(len(deg1_repos)))
     deg1_repos = sorted(deg1_repos, key=lambda n: -nodes[n].get('downloads', 0))
-    print('Most risked projects: {0}'.format(deg1_repos[0:limit]))
-    active_users = sorted(users, key=lambda u: -g.degree[u])
-    print('Most active users: {0}'.format({u: g.degree[u] for u in active_users[0:limit]}))
+    print('Most risked projects: \n{0}'.format(deg1_repos[0:limit]))
+
+    def take_by_value(items, l, f=None):
+        items = sorted(items, key=lambda t: -t[1])
+        if f is not None:
+            items = filter(f, items)
+        return dict(itertools.islice(items, 0, l))
+
+    repo_centrality = nx.algorithms.bipartite.degree_centrality(g, repos)
+    repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
+    print('Most popular projects: \n{0}'.format(repo_centrality))
+
+    repo_centrality = nx.algorithms.bipartite.closeness_centrality(g, repos, normalized=True)
+    repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
+    print('Most relatable projects: \n{0}'.format(repo_centrality))
+
+    repo_centrality = nx.algorithms.bipartite.betweenness_centrality(g, repos)
+    repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
+    print('Most connecting projects: \n{0}'.format(repo_centrality))
+
+    user_centrality = nx.algorithms.bipartite.degree_centrality(g, users)
+    user_centrality = take_by_value(user_centrality.items(), limit, f=lambda t: t[0] in users)
+    print('Most active users: \n{0}'.format(user_centrality))
+
+    user_centrality = nx.algorithms.bipartite.betweenness_centrality(g, users)
+    user_centrality = take_by_value(user_centrality.items(), limit, f=lambda t: t[0] in users)
+    print('Most connecting users: \n{0}'.format(user_centrality))
+
+    bridges = nx.algorithms.bridges(g)
+    print('Connecting memberships: \n{0}'.format(list(bridges)))
 
 
 if __name__ == "__main__":
