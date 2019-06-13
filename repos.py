@@ -89,9 +89,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     c = GithubCrawler(args.user, args.password)
+
     g = None if args.input is None else nx.read_gexf(args.input)
     if g is None or nx.number_of_nodes(g) == 0 or args.scan:
-        for g in c.find_all(args.query, limit=args.limit, since=args.date, previous=g):
+        for g in c.find(args.query, limit=args.limit, since=args.date, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
             analize_graph(g)

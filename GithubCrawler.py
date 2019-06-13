@@ -6,52 +6,71 @@ from threading import Lock
 from urllib.error import HTTPError
 
 import networkx as nx
-from github import Github, Repository, NamedUser, RateLimitExceededException, GithubException
+from github import Github, Repository, NamedUser, PaginatedList, RateLimitExceededException, GithubException
 
+
+def wait_for_reset(client: Github):
+    available, _ = client.rate_limiting
+    timestamp = client.rate_limiting_resettime
+    if timestamp and available == 0:
+        t = timestamp - time.time()
+        if t > 0:
+            print("Waiting {0} seconds.".format(t))
+            time.sleep(t)
 
 class GithubCrawler:
-    offset = 0
-    completed = False
-
     def __init__(self, user: str, password: str):
         assert user is None or isinstance(user, str)
         assert password is None or isinstance(password, str)
 
         self.client = Github(user, password, retry=5)
 
-    def reset(self):
-        self.offset = 0
-
-    def find_all(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None,
-                 wait_time: int = 0):
-        assert isinstance(wait_time, int)
-
-        g = previous
-        previous_count = nx.number_of_nodes(g) if isinstance(g, nx.Graph) else 0
-        timestamp = None
-        while not self.completed:
-            if timestamp is not None:
-                t = timestamp - time.time()
-                if t > 0:
-                    print("Waiting {0} seconds.".format(t))
-                    time.sleep(t)
-            g = self.find(query, limit=limit, since=since, previous=g)
-            limit = None if limit is None else max(0, limit - nx.number_of_nodes(g) + previous_count)
-            timestamp = self.client.rate_limiting_resettime
-            if wait_time:
-                timestamp = max(time.time() + wait_time, timestamp)
-            yield g
-
-    def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None) -> nx.Graph:
+    def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None):
         assert query is None or isinstance(query, str)
         assert limit is None or isinstance(limit, int) and limit >= 0
         assert since is None or isinstance(since, datetime)
         assert previous is None or isinstance(previous, nx.Graph)
 
-        g = previous or nx.Graph()
+        print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
+        repos = self.client.search_repositories(query) if query else self.client.get_repos(since=since)
+        if limit:
+            repos = repos[:limit]
+
+        wait_for_reset(self.client)
+
+        repo_list = []
+        for repo in repos:
+            wait_for_reset(self.client)
+            repo_list.append(repo)
+
+        return GithubProgressiveIterator(self.client, previous, repo_list, since=since)
+
+
+class GithubProgressiveIterator:
+    completed = False
+    lock = Lock()
+
+    def __init__(self, client: Github, original: nx.Graph, repos: [Repository], since: datetime):
+        assert isinstance(client, Github)
+        assert original is None or isinstance(original, nx.Graph)
+        assert isinstance(repos, list)
+        assert since is None or isinstance(since, datetime)
+
+        self.client = client
+        self.original = original
+        self.repos = repos
+        self.since = since
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> nx.Graph:
+        g = self.original or nx.Graph()
         graph_lock = Lock()
 
-        def import_repo(repo: Repository) -> (str, None):
+        wait_for_reset(self.client)
+
+        def import_repo(repo: Repository) -> (Repository, None):
             repo_id = repo.full_name
             if repo_id is None:
                 return None
@@ -81,7 +100,7 @@ class GithubCrawler:
                     g.add_edge(user_id, repo_id, relation=relation)
 
             try:
-                if since is None:
+                if self.since is None:
                     if repo.owner is not None:
                         link_user(repo.owner, relation='owner')
 
@@ -89,7 +108,7 @@ class GithubCrawler:
                     for user in contributors:
                         link_user(user, relation='contributor')
                 else:
-                    commits = repo.get_commits(since=since)
+                    commits = repo.get_commits(since=self.since)
                     for commit in commits:
                         link_user(commit.author, relation="committer")
             except Exception:
@@ -97,18 +116,16 @@ class GithubCrawler:
                     g.remove_node(repo_id)
                 raise
 
-            return repo.full_name
+            return repo
 
         try:
-            print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
-            repos = self.client.search_repositories(query) if query else self.client.get_repos(since=since)
-            if self.offset:
-                repos = repos[self.offset:]
-            if limit:
-                repos = repos[:limit]
+            print('Finding more repositories.')
             with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                for repo_id in executor.map(import_repo, repos):
-                    self.offset += 1
+                workers = (executor.submit(import_repo, worker) for worker in self.repos)
+
+                for worker in concurrent.futures.as_completed(workers):
+                    with self.lock:
+                        self.repos.remove(worker.result())
             self.completed = True
 
         except HTTPError:
