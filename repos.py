@@ -14,14 +14,21 @@ class GithubCrawler:
     offset = 0
     completed = False
 
-    def __init__(self, user, password):
+    def __init__(self, user: str, password: str):
+        assert user is None or isinstance(user, str)
+        assert password is None or isinstance(password, str)
+
         self.client = Github(user, password, retry=5)
 
     def reset(self):
         self.offset = 0
 
-    def find_all(self, query, limit=None, since=None, previous=None, wait_time=300):
+    def find_all(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None,
+                 wait_time: int = 0):
+        assert isinstance(wait_time, int)
+
         g = previous
+        previous_count = nx.number_of_nodes(g) if isinstance(g, nx.Graph) else 0
         timestamp = None
         while not self.completed:
             if timestamp is not None:
@@ -30,31 +37,42 @@ class GithubCrawler:
                     print("Waiting {0} seconds.".format(t))
                     time.sleep(t)
             g = self.find(query, limit=limit, since=since, previous=g)
-            # timestamp = time.time() + wait_time
+            limit = None if limit is None else max(0, limit - nx.number_of_nodes(g) + previous_count)
             timestamp = self.client.rate_limiting_resettime
+            if wait_time:
+                timestamp = max(time.time() + wait_time, timestamp)
             yield g
 
-    def find(self, query, limit=None, since=None, previous=None):
-        g = previous if isinstance(previous, nx.Graph) else nx.Graph()
+    def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None) -> nx.Graph:
+        assert query is None or isinstance(query, str)
+        assert limit is None or isinstance(limit, int) and limit >= 0
+        assert since is None or isinstance(since, datetime)
+        assert previous is None or isinstance(previous, nx.Graph)
+
+        g = previous or nx.Graph()
         graph_lock = Lock()
 
-        def import_repo(repo):
+        def import_repo(repo: Repository) -> (str, None):
             repo_id = repo.full_name
-            if repo_id is None or repo_id in g:
-                return
-            if repo.fork and repo.parent is not None and repo.parent.full_name not in g:
-                import_repo(repo.parent)
+            if repo_id is None:
+                return None
 
             with graph_lock:
+                if repo_id in g:
+                    return None
                 print('Analyzing repo {0}...'.format(repo.full_name))
                 language = repo.language or '?'
                 weight = repo.watchers_count or 0
                 g.add_node(repo_id, bipartite=0, language=language, weight=weight)
-                if repo.fork and repo.parent is not None:
-                    #g.add_edge(repo_id, repo.parent.full_name)
-                    pass
 
-            def link_user(user, relation=None):
+            if repo.fork and repo.parent is not None:
+                parent_id = import_repo(repo.parent)
+                if parent_id:
+                    with graph_lock:
+                        # g.add_edge(repo_id, parent_id)
+                        pass
+
+            def link_user(user: NamedUser, relation: str = None):
                 user_id = user.login
                 if user_id is None:
                     return
@@ -80,14 +98,17 @@ class GithubCrawler:
                     g.remove_node(repo_id)
                 raise
 
+            return repo.full_name
+
         try:
-            repos = self.client.search_repositories(query) if isinstance(query, str) else self.client.get_repos(since=since)
+            print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
+            repos = self.client.search_repositories(query) if query else self.client.get_repos(since=since)
             if self.offset:
                 repos = repos[self.offset:]
-            if isinstance(limit, int):
-                repos = repos[0:limit]
+            if limit:
+                repos = repos[:limit]
             with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                for _ in executor.map(import_repo, repos):
+                for repo_id in executor.map(import_repo, repos):
                     self.offset += 1
             self.completed = True
 
@@ -105,7 +126,11 @@ class GithubCrawler:
         return g
 
 
-def analize_graph(g, limit=3, clean=True):
+def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True):
+    assert isinstance(g, nx.Graph)
+    assert isinstance(limit, int) and limit >= 0
+    assert isinstance(clean, bool)
+
     def take_by_value(items, l, f=None):
         items = sorted(items, key=lambda t: -t[1])
         if f is not None:
