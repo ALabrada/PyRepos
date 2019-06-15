@@ -6,7 +6,7 @@ from threading import Lock
 from urllib.error import HTTPError
 
 import networkx as nx
-from github import Github, Repository, NamedUser, PaginatedList, RateLimitExceededException, GithubException
+from github import Github, Repository, NamedUser, Commit, PaginatedList, RateLimitExceededException, GithubException
 
 
 def wait_for_reset(client: Github):
@@ -14,9 +14,13 @@ def wait_for_reset(client: Github):
     timestamp = client.rate_limiting_resettime
     if timestamp and available == 0:
         t = timestamp - time.time()
-        if t > 0:
-            print("Waiting {0} seconds.".format(t))
-            time.sleep(t)
+        while t > 0:
+            mins, secs = divmod(t, 60)
+            time_format = 'Waiting {:02.0f}:{:02.0f}'.format(mins, secs)
+            print(time_format, end='\r')
+            time.sleep(1)
+            t = timestamp - time.time()
+
 
 class GithubCrawler:
     def __init__(self, user: str, password: str):
@@ -32,111 +36,99 @@ class GithubCrawler:
         assert previous is None or isinstance(previous, nx.Graph)
 
         print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
-        repos = self.client.search_repositories(query) if query else self.client.get_repos(since=since)
-        if limit:
-            repos = repos[:limit]
-
-        wait_for_reset(self.client)
-
-        repo_list = []
-        for repo in repos:
-            wait_for_reset(self.client)
-            repo_list.append(repo)
-
-        return GithubProgressiveIterator(self.client, previous, repo_list, since=since)
-
-
-class GithubProgressiveIterator:
-    completed = False
-    lock = Lock()
-
-    def __init__(self, client: Github, original: nx.Graph, repos: [Repository], since: datetime):
-        assert isinstance(client, Github)
-        assert original is None or isinstance(original, nx.Graph)
-        assert isinstance(repos, list)
-        assert since is None or isinstance(since, datetime)
-
-        self.client = client
-        self.original = original
-        self.repos = repos
-        self.since = since
-
-    def __iter__(self):
-        return self
-
-    def __next__(self) -> nx.Graph:
-        g = self.original or nx.Graph()
+        g = previous or nx.Graph()
         graph_lock = Lock()
+        completed = False
+        repos: PaginatedList = self.client.search_repositories(query) if query else self.client.get_repos(since=since)
+        page = 1
+        page_repos = []
+        count = 0
+        while not completed:
+            wait_for_reset(self.client)
 
-        wait_for_reset(self.client)
+            def import_repo(repo: Repository) -> (Repository, None):
+                repo_id = repo.full_name
+                if repo_id is None:
+                    return repo
 
-        def import_repo(repo: Repository) -> (Repository, None):
-            repo_id = repo.full_name
-            if repo_id is None:
-                return None
-
-            with graph_lock:
-                if repo_id in g:
-                    return None
-                print('Analyzing repo {0}...'.format(repo.full_name))
-                language = repo.language or '?'
-                weight = repo.watchers_count or 0
-                g.add_node(repo_id, bipartite=0, language=language, weight=weight)
-
-            if repo.fork and repo.parent is not None:
-                parent_id = import_repo(repo.parent)
-                if parent_id:
-                    with graph_lock:
-                        # g.add_edge(repo_id, parent_id)
-                        pass
-
-            def link_user(user: NamedUser, relation: str = None):
-                user_id = user.login
-                if user_id is None:
-                    return
                 with graph_lock:
-                    if user_id not in g:
-                        g.add_node(user_id, bipartite=1)
-                    g.add_edge(user_id, repo_id, relation=relation)
+                    if repo_id in g:
+                        return repo
+                    # print('Analyzing repo {0}...'.format(repo.full_name))
+                    language = repo.language or '?'
+                    weight = repo.watchers_count or 0
+                    g.add_node(repo_id, bipartite=0, language=language, weight=weight)
+
+                if repo.fork and repo.parent is not None:
+                    parent_id = import_repo(repo.parent)
+                    if parent_id:
+                        with graph_lock:
+                            # g.add_edge(repo_id, parent_id)
+                            pass
+
+                def link_user(user_id: str, relation: str = None):
+                    if user_id is None:
+                        return
+                    with graph_lock:
+                        if user_id not in g:
+                            g.add_node(user_id, bipartite=1)
+                        g.add_edge(user_id, repo_id, relation=relation)
+
+                try:
+                    if since is None:
+                        if repo.owner is not None:
+                            link_user(repo.owner.email, relation='owner')
+
+                        contributors = repo.get_contributors()
+                        for user in contributors:
+                            link_user(user.email, relation='contributor')
+                    else:
+                        commits = repo.get_commits(since=since)
+                        for commit in commits:
+                            link_user(commit.author.email, relation="committer")
+                except RateLimitExceededException:
+                    with graph_lock:
+                        g.remove_node(repo_id)
+                    raise
+                except GithubException:
+                    with graph_lock:
+                        g.remove_node(repo_id)
+                except Exception:
+                    raise
+
+                return repo
 
             try:
-                if self.since is None:
-                    if repo.owner is not None:
-                        link_user(repo.owner, relation='owner')
+                print('Finding more repositories.')
+                with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                    while not limit or count < limit:
+                        if not page_repos:
+                            page_repos = repos.get_page(page)
+                            page += 1
+                            if len(page_repos) == 0:
+                                break
 
-                    contributors = repo.get_contributors()
-                    for user in contributors:
-                        link_user(user, relation='contributor')
-                else:
-                    commits = repo.get_commits(since=self.since)
-                    for commit in commits:
-                        link_user(commit.author, relation="committer")
-            except Exception:
-                with graph_lock:
-                    g.remove_node(repo_id)
-                raise
+                        workers = (executor.submit(import_repo, worker) for worker in page_repos)
 
-            return repo
+                        for worker in concurrent.futures.as_completed(workers):
+                            repo: Repository = worker.result()
+                            if repo is not None:
+                                print('Analyzed repo {0}.'.format(repo.full_name or '?'))
+                                page_repos.remove(repo)
+                                count += 1
+                completed = True
 
-        try:
-            print('Finding more repositories.')
-            with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-                workers = (executor.submit(import_repo, worker) for worker in self.repos)
+            except HTTPError:
+                completed = True
+                print(sys.exc_info())
+                print('Communication error with GitHub. Graph completed prematurely.')
+            except RateLimitExceededException:
+                print(sys.exc_info())
+                print('The GitHub rate limit was triggered. Please try again later. '
+                      'See https://developer.github.com/v3/#abuse-rate-limits')
+            except GithubException:
+                completed = True
+                print(sys.exc_info())
+                print('Communication error with GitHub. Graph completed prematurely.')
 
-                for worker in concurrent.futures.as_completed(workers):
-                    with self.lock:
-                        self.repos.remove(worker.result())
-            self.completed = True
-
-        except HTTPError:
-            print(sys.exc_info())
-            print('Communication error with GitHub. Graph completed prematurely.')
-        except RateLimitExceededException:
-            print(sys.exc_info())
-            print('The GitHub rate limit was triggered. Please try again later. '
-                  'See https://developer.github.com/v3/#abuse-rate-limits')
-        except GithubException:
-            print(sys.exc_info())
-            print('Communication error with GitHub. Graph completed prematurely.')
-
-        return g
+            yield g

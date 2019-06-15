@@ -81,7 +81,8 @@ if __name__ == "__main__":
                                              'Login is not usually required but can offer advantages.')
     parser.add_argument('-p', '--password', help='The password to use for login. '
                                                  'Login is not usually required but can offer advantages.')
-    parser.add_argument('-l', '--limit', type=int, help='The maximum number of repositories to include in the graph.')
+    parser.add_argument('-l', '--limit', type=int, default=1000,
+                        help='The maximum number of repositories to include in the graph.')
     parser.add_argument('-q', '--query', help='Specify the projects of interest.')
     parser.add_argument('-d', '--date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
                         help='Starting date.')
