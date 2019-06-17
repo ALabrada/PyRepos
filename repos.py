@@ -2,6 +2,8 @@ import networkx as nx
 import itertools
 import argparse
 from datetime import datetime
+import matplotlib.pyplot as plt
+from matplotlib import cm, colors
 
 from GithubCrawler import GithubCrawler
 
@@ -69,12 +71,41 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True):
     print('Most connecting users: \n{0}'.format(user_centrality))
 
 
+def draw_communities(G: nx.Graph):
+    print('Drawing graph...')
+    pos = nx.spring_layout(G)
+    nodes = g.nodes(data=True)
+    repos = {n for n, d in nodes if d['bipartite'] == 0}
+    users = set(g) - repos
+    groups = {0: repos, 1: users}
+
+    fig, ax = plt.subplots(figsize=(16, 9))
+
+    # Normalize number of clubs for choosing a color
+    norm = colors.Normalize(vmin=0, vmax=2)
+
+    for group, members in groups.items():
+        nx.draw_networkx_nodes(G, pos,
+                               nodelist=members,
+                               node_color=cm.jet(norm(group)),
+                               node_size=5,
+                               alpha=0.8,
+                               ax=ax)
+
+    # Draw edges (social connections) and show final plot
+    plt.title("Github repositories")
+    nx.draw_networkx_edges(G, pos, alpha=0.5, ax=ax)
+    plt.show()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
     parser.add_argument('-c', '--continue', dest='scan', action='store_true',
                         help='Include more repositories from the search results. '
                              'It is ignored if there is no input graph.')
+    parser.add_argument('--no-stats', dest='no_stats', action='store_true', help='Avoid analyzing graph statistics.')
+    parser.add_argument('--draw', dest='draw', action='store_true', help='Draw the resulting graph.')
     parser.add_argument('-s', '--source', default='GitHub', choices=['GitHub', 'GitLab'],
                         help='The type of repository.')
     parser.add_argument('-u', '--user', help='The user name to use for login. '
@@ -96,6 +127,12 @@ if __name__ == "__main__":
         for g in c.find(args.query, limit=args.limit, since=args.date, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
-            analize_graph(g)
+            if not args.no_stats:
+                analize_graph(g)
+            if args.draw:
+                draw_communities(g)
     else:
-        analize_graph(g)
+        if not args.no_stats:
+            analize_graph(g)
+        if args.draw:
+            draw_communities(g)
