@@ -29,9 +29,12 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
 
     if clean:
         repo_count = len(repos)
+        components = sorted(components, key=lambda c: len(c))
+        min_size = len(components[-1])/2
+
         for component in components:
             component_repos = repos.intersection(component)
-            if len(component_repos) <= 5:
+            if len(component_repos) <= 5 or len(component) < min_size:
                 repos.difference_update(component)
                 users.difference_update(component)
                 # g.remove_nodes_from(component)
