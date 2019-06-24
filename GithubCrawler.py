@@ -77,15 +77,15 @@ class GithubCrawler:
                 try:
                     if since is None:
                         if repo.owner is not None:
-                            link_user(repo.owner.email, relation='owner')
+                            link_user(repo.owner.login, relation='owner')
 
                         contributors = repo.get_contributors()
                         for user in contributors:
-                            link_user(user.email, relation='contributor')
+                            link_user(user.login or user.email, relation='contributor')
                     else:
                         commits = repo.get_commits(since=since)
                         for commit in commits:
-                            link_user(commit.author.email, relation="committer")
+                            link_user(commit.author.login or commit.author.email, relation="committer")
                 except RateLimitExceededException:
                     with graph_lock:
                         g.remove_node(repo_id)

@@ -2,6 +2,8 @@ import networkx as nx
 import itertools
 import argparse
 from datetime import datetime
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
@@ -13,7 +15,7 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
     assert isinstance(limit, int)
 
     def take_by_value(items, l, f=None):
-        items = sorted(items, key=lambda t: -t[1])
+        items = sorted(items, key=lambda t: t[1], reverse=True)
         if f is not None:
             items = filter(f, items)
         return [k for k, v in itertools.islice(items, 0, l)]
@@ -26,6 +28,17 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
     print('Users: {0}'.format(len(users)))
     components = list(nx.connected_components(g))
     print('Connected components: \n{0}'.format(sum(1 for _ in components)))
+    languages = {d['language'] for n, d in nodes if d['bipartite'] == 0}
+    print('Languages: \n{0}'.format(languages))
+
+    bridges = {(n1, n2): len(next((c for c in components if n1 in c), [])) for n1, n2 in nx.algorithms.bridges(g)}
+    bridges = take_by_value(bridges.items(), limit)
+    print('Connecting memberships: \n{0}'.format(list(bridges)))
+
+    deg1_repos = [n for n in repos if g.degree[n] <= 1]
+    print('Number of risked projects: \n{0}'.format(len(deg1_repos)))
+    deg1_repos = sorted(deg1_repos, key=lambda n: -nodes[n].get('weight', 0))
+    print('Most risked projects: \n{0}'.format(deg1_repos[0:limit]))
 
     if clean:
         repo_count = len(repos)
@@ -34,7 +47,7 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
 
         for component in components:
             component_repos = repos.intersection(component)
-            if len(component_repos) <= 5 or len(component) < min_size:
+            if len(component_repos) <= 1 or len(component) < min_size:
                 repos.difference_update(component)
                 users.difference_update(component)
                 # g.remove_nodes_from(component)
@@ -45,16 +58,7 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
             g = nx.subgraph(g, repos.union(users))
 
     labels = set()
-    if limit:
-        bridges = {(n1, n2): len(next((c for c in components if n1 in c), [])) for n1, n2 in nx.algorithms.bridges(g)}
-        bridges = take_by_value(bridges.items(), limit)
-        print('Connecting memberships: \n{0}'.format(list(bridges)))
-
-        deg1_repos = [n for n in repos if g.degree[n] <= 1]
-        print('Number of risked projects: \n{0}'.format(len(deg1_repos)))
-        deg1_repos = sorted(deg1_repos, key=lambda n: -nodes[n].get('weight', 0))
-        print('Most risked projects: \n{0}'.format(deg1_repos[0:limit]))
-
+    if limit and repos:
         repo_centrality = nx.algorithms.bipartite.degree_centrality(g, repos)
         repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
         labels.update(repo_centrality)
@@ -63,23 +67,19 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
         repo_centrality = nx.algorithms.bipartite.closeness_centrality(g, repos, normalized=True)
         repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
         labels.update(repo_centrality)
-        print('Most relatable projects: \n{0}'.format(repo_centrality))
-
-        repo_centrality = nx.algorithms.bipartite.betweenness_centrality(g, repos)
-        repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
-        labels.update(repo_centrality)
-        print('Most connecting projects: \n{0}'.format(repo_centrality))
+        print('Most central projects: \n{0}'.format(repo_centrality))
 
         user_centrality = nx.algorithms.bipartite.degree_centrality(g, users)
         user_centrality = take_by_value(user_centrality.items(), limit, f=lambda t: t[0] in users)
         labels.update(user_centrality)
         print('Most active users: \n{0}'.format(user_centrality))
 
+        user_languages = {u: len(set(nodes[n]['language'] for n in nx.neighbors(g, u) if nodes[n]['language']))
+                          for u in users}
         user_centrality = nx.algorithms.bipartite.betweenness_centrality(g, users)
-        user_centrality = take_by_value(user_centrality.items(), limit, f=lambda t: t[0] in users)
+        user_centrality = take_by_value(user_centrality.items(), limit, f=lambda t: user_languages.get(t[0]) or 0 > 1)
         labels.update(user_centrality)
-        print('Most connecting users: \n{0}'.format(user_centrality))
-
+        print('Users connecting communities: \n{0}'.format(user_centrality))
     if draw:
         draw_communities(g, labels=list(labels))
 
@@ -93,17 +93,17 @@ def draw_communities(G: nx.Graph, labels=None):
     print('Drawing graph...')
     pos = nx.spring_layout(G)
     nodes = G.nodes(data=True)
-    repos = {n for n, d in nodes if d['bipartite'] == 0}
-    users = set(G) - repos
-    norm = colors.Normalize(vmin=0, vmax=2)
+    languages = {d['language'] for n, d in nodes if d['bipartite'] == 0}
+    languages = {x: i for i, x in enumerate(languages, start=0)}
+    norm = colors.Normalize(vmin=0, vmax=len(languages))
     node_list = list(G.nodes)
-    color_list = [cm.jet(norm(d['bipartite'])) for n, d in nodes]
-    size_list = [1 if d['bipartite'] else 5 for n, d in nodes]
+    color_list = ['0.3' if d['bipartite'] else cm.jet(norm(languages[d['language']])) for n, d in nodes]
+    size_list = [2 if d['bipartite'] else 6 for n, d in nodes]
 
     fig, ax = plt.subplots(figsize=(16, 9))
     plt.title("Github repositories")
     nx.draw_networkx(G, pos=pos, nodelist=node_list, node_color=color_list, node_size=size_list,
-                     with_labels=True, labels=labels, ax=ax, edge_color='0.5')
+                     with_labels=True, labels=labels, ax=ax, edge_color='0.7')
     plt.show()
 
 
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     c = GithubCrawler(args.user, args.password)
 
     g = None if args.input is None else nx.read_gexf(args.input)
-    if g is None or nx.number_of_nodes(g) == 0 or args.scan:
+    if g is None or nx.number_of_nodes(g) == 0 or args.scan or args.output:
         for g in c.find(args.query, limit=args.limit, since=args.date, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
