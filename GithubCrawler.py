@@ -46,6 +46,14 @@ class GithubCrawler:
         while not completed:
             wait_for_reset(self.client)
 
+            def link_user(repo_id: str, user_id: str, **attr):
+                if user_id is None:
+                    return
+                with graph_lock:
+                    if user_id not in g:
+                        g.add_node(user_id, bipartite=1)
+                    g.add_edge(user_id, repo_id, **attr)
+
             def import_repo(repo: Repository) -> (Repository, None):
                 repo_id = repo.full_name
                 if repo_id is None:
@@ -54,38 +62,28 @@ class GithubCrawler:
                 with graph_lock:
                     if repo_id in g:
                         return repo
-                    # print('Analyzing repo {0}...'.format(repo.full_name))
-                    language = repo.language or '?'
-                    weight = repo.watchers_count or 0
+
+                if repo.fork and repo.parent and repo.parent.full_name and repo.owner:
+                    import_repo(repo.parent)
+                    link_user(repo.parent.full_name, repo.owner.login, relation='fork', fork_source=repo_id)
+
+                language = repo.language or '?'
+                weight = repo.watchers_count or 0
+                with graph_lock:
                     g.add_node(repo_id, bipartite=0, language=language, weight=weight)
-
-                if repo.fork and repo.parent is not None:
-                    parent_id = import_repo(repo.parent)
-                    if parent_id:
-                        with graph_lock:
-                            # g.add_edge(repo_id, parent_id)
-                            pass
-
-                def link_user(user_id: str, relation: str = None):
-                    if user_id is None:
-                        return
-                    with graph_lock:
-                        if user_id not in g:
-                            g.add_node(user_id, bipartite=1)
-                        g.add_edge(user_id, repo_id, relation=relation)
 
                 try:
                     if since is None:
                         if repo.owner is not None:
-                            link_user(repo.owner.login, relation='owner')
+                            link_user(repo_id, repo.owner.login, relation='owner')
 
                         contributors = repo.get_contributors()
                         for user in contributors:
-                            link_user(user.login or user.email, relation='contributor')
+                            link_user(repo_id, user.login or user.email, relation='contributor')
                     else:
                         commits = repo.get_commits(since=since)
                         for commit in commits:
-                            link_user(commit.author.login or commit.author.email, relation="committer")
+                            link_user(repo_id, commit.author.login or commit.author.email, relation="committer")
                 except RateLimitExceededException:
                     with graph_lock:
                         g.remove_node(repo_id)

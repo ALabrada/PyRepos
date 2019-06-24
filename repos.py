@@ -20,6 +20,7 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
             items = filter(f, items)
         return [k for k, v in itertools.islice(items, 0, l)]
 
+    labels = set()
     print('Graph analysis:')
     nodes = g.nodes(data=True)
     repos = {n for n, d in nodes if d['bipartite'] == 0}
@@ -57,8 +58,13 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
             # g = nx.classes.graphviews.subgraph_view(g, filter_node=lambda n: n in repos or n in users)
             g = nx.subgraph(g, repos.union(users))
 
-    labels = set()
     if limit and repos:
+        fork_sources = {n: d.get('fork_source') for n, d in nodes if d.get('relation') == 'fork'}
+        fork_count = {n: sum(1 for k, v in fork_sources if v == n) for n in repos}
+        fork_count = take_by_value(fork_count.items(), limit)
+        labels.update(fork_count)
+        print('Most forked projects: \n{0}'.format(fork_count))
+
         repo_centrality = nx.algorithms.bipartite.degree_centrality(g, repos)
         repo_centrality = take_by_value(repo_centrality.items(), limit, f=lambda t: t[0] in repos)
         labels.update(repo_centrality)
