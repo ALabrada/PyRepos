@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
 from GithubCrawler import GithubCrawler
+from GitlabCrawler import GitlabCrawler
 
 
 def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = False):
@@ -114,6 +115,8 @@ def draw_communities(G: nx.Graph, labels=None):
 
 
 if __name__ == "__main__":
+    github_repo = ['https://www.github.com', 'www.github.com', 'github.com']
+
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
     parser.add_argument('-c', '--continue', dest='scan', action='store_true',
@@ -122,8 +125,8 @@ if __name__ == "__main__":
     parser.add_argument('--stats', type=int, help='Specify the amount of results to display in graph analysis. '
                                         'Use 0 to disable graph analysis.')
     parser.add_argument('--draw', dest='draw', action='store_true', help='Draw the resulting graph.')
-    parser.add_argument('-s', '--source', default='GitHub', choices=['GitHub', 'GitLab'],
-                        help='The type of repository.')
+    parser.add_argument('-s', '--source', default=github_repo[0],
+                        help='The URL of the repository.')
     parser.add_argument('-u', '--user', help='The user name to use for login. '
                                              'Login is not usually required but can offer advantages.')
     parser.add_argument('-p', '--password', help='The password to use for login. '
@@ -136,7 +139,8 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', help='Specify a path to save the resulting graph in GEXF format.')
     args = parser.parse_args()
 
-    c = GithubCrawler(args.user, args.password)
+    c = GithubCrawler(args.user, args.password) if args.source.lower() in github_repo else \
+        GitlabCrawler(args.source, args.user, args.password)
 
     g = None if args.input is None else nx.read_gexf(args.input)
     if g is None or nx.number_of_nodes(g) == 0 or args.scan or args.output:
