@@ -23,11 +23,12 @@ def wait_for_reset(client: Github):
 
 
 class GithubCrawler:
-    def __init__(self, user: str, password: str):
+    def __init__(self, token: str, user: str, password: str):
         assert user is None or isinstance(user, str)
         assert password is None or isinstance(password, str)
+        assert token is None or isinstance(token, str)
 
-        self.client = Github(user, password, retry=5)
+        self.client = Github(login_or_token=token or user, password=password, retry=5)
 
     def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None):
         assert query is None or isinstance(query, str)

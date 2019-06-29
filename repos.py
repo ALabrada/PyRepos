@@ -131,6 +131,8 @@ if __name__ == "__main__":
                                              'Login is not usually required but can offer advantages.')
     parser.add_argument('-p', '--password', help='The password to use for login. '
                                                  'Login is not usually required but can offer advantages.')
+    parser.add_argument('-t', '--token', help='Your private token for authentication. '
+                                              'Login is not usually required but can offer advantages.')
     parser.add_argument('-l', '--limit', type=int, default=1000,
                         help='The maximum number of repositories to include in the graph.')
     parser.add_argument('-q', '--query', help='Specify the projects of interest.')
@@ -139,8 +141,10 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', help='Specify a path to save the resulting graph in GEXF format.')
     args = parser.parse_args()
 
-    c = GithubCrawler(args.user, args.password) if args.source.lower() in github_repo else \
-        GitlabCrawler(args.source, args.user, args.password)
+    if args.source.lower() in github_repo:
+        c = GithubCrawler(token=args.token, user=args.user, password=args.password)
+    else:
+        c = GitlabCrawler(args.source, token=args.token, user=args.user, password=args.password)
 
     g = None if args.input is None else nx.read_gexf(args.input)
     if g is None or nx.number_of_nodes(g) == 0 or args.scan or args.output:

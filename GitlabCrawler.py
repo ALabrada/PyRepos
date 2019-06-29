@@ -9,14 +9,19 @@ from gitlab import Gitlab, GitlabGetError
 
 
 class GitlabCrawler:
-    def __init__(self, url: str, user: str, password: str):
+    def __init__(self, url: str, token: str, user: str, password: str):
         assert url is None or isinstance(url, str)
         assert user is None or isinstance(user, str)
         assert password is None or isinstance(password, str)
+        assert token is None or isinstance(token, str)
 
-        self.client = Gitlab(url or 'https://gitlab.com/', email=user, password=password)
-        if user and password:
-            self.client.auth()
+        url = url or 'https://gitlab.com/'
+        if token:
+            self.client = Gitlab(url, private_token=token)
+        else:
+            self.client = Gitlab(url, email=user, password=password)
+            if user and password:
+                self.client.auth()
 
     def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None):
         assert query is None or isinstance(query, str)
@@ -57,9 +62,13 @@ class GitlabCrawler:
                     if repo_id in g:
                         return repo
 
-                #if repo.fork and repo.parent and repo.parent.path_with_namespace and repo.owner:
-                #    import_repo(repo.parent)
-                #    link_user(repo.parent.path_with_namespace, repo.namespace['path'], relation='fork', fork_source=repo_id)
+                if 'forked_from_project' in repo.attributes:
+                    d = repo.attributes['forked_from_project']
+                    if d:
+                        parent_id = d['path_with_namespace']
+                        parent = repos.get(parent_id)
+                        import_repo(parent)
+                        link_user(parent_id, repo.namespace['name'], relation='fork', fork_source=repo_id)
 
                 languages = repo.languages()
                 language = sorted(languages.items(), key=lambda t: t[1], reverse=True)[0][0] \
@@ -71,11 +80,14 @@ class GitlabCrawler:
                 try:
                     if since is None:
                         if repo.namespace is not None:
-                            link_user(repo_id, repo.namespace['path'], relation='owner')
+                            link_user(repo_id, repo.namespace['name'], relation='owner')
 
                         contributors = repo.repository_contributors(all=True, obey_rate_limit=False)
                         for user in contributors:
-                            link_user(repo_id, user['email'], relation='contributor')
+                            user_id = user.get('name')
+                            if not user_id or user_id.lower() == 'unknown':
+                                user_id = user['email']
+                            link_user(repo_id, user_id, relation='contributor')
                     else:
                         commits = repo.get_commits(since=since)
                         for commit in commits:
