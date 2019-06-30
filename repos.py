@@ -1,6 +1,7 @@
 import networkx as nx
 import itertools
 import argparse
+import dateutil
 from datetime import datetime
 import matplotlib
 matplotlib.use('TkAgg')
@@ -119,9 +120,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
-    parser.add_argument('-c', '--continue', dest='scan', action='store_true',
-                        help='Include more repositories from the search results. '
-                             'It is ignored if there is no input graph.')
     parser.add_argument('--stats', type=int, help='Specify the amount of results to display in graph analysis. '
                                         'Use 0 to disable graph analysis.')
     parser.add_argument('--draw', dest='draw', action='store_true', help='Draw the resulting graph.')
@@ -135,8 +133,8 @@ if __name__ == "__main__":
                                               'Login is not usually required but can offer advantages.')
     parser.add_argument('-l', '--limit', type=int, default=1000,
                         help='The maximum number of repositories to include in the graph.')
-    parser.add_argument('-q', '--query', help='Specify the projects of interest.')
-    parser.add_argument('-d', '--date', type=lambda s: datetime.strptime(s, '%Y-%m-%d'),
+    parser.add_argument('-q', '--query', help='Search the projects that match the specified text.')
+    parser.add_argument('--since', type=lambda s: dateutil.parser.parse(s),
                         help='Starting date.')
     parser.add_argument('-o', '--output', help='Specify a path to save the resulting graph in GEXF format.')
     args = parser.parse_args()
@@ -146,9 +144,18 @@ if __name__ == "__main__":
     else:
         c = GitlabCrawler(args.source, token=args.token, user=args.user, password=args.password)
 
-    g = None if args.input is None else nx.read_gexf(args.input)
-    if g is None or nx.number_of_nodes(g) == 0 or args.scan or args.output:
-        for g in c.find(args.query, limit=args.limit, since=args.date, previous=g):
+    g: nx.Graph = None
+    if args.input:
+        g = nx.read_gexf(args.input)
+        if args.since:
+            nodes = g.nodes(data=True)
+            edges = g.edges(data=True)
+            g.remove_edges_from([(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+            g.remove_nodes_from([n for n, d in nodes.items() if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+
+
+    if args.query:
+        for g in c.find(args.query, limit=args.limit, since=args.since, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
             analize_graph(g, limit=args.stats, draw=args.draw)

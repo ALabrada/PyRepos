@@ -1,11 +1,12 @@
 import concurrent.futures
 import sys
 from datetime import datetime
+import dateutil
 from threading import Lock
 from urllib.error import HTTPError
 
 import networkx as nx
-from gitlab import Gitlab, GitlabGetError
+from gitlab import Gitlab, GitlabGetError, GitlabListError, GitlabError
 
 
 class GitlabCrawler:
@@ -31,6 +32,7 @@ class GitlabCrawler:
 
         print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
         g = previous or nx.Graph()
+        since = since.isoformat() if since else None
         graph_lock = Lock()
         completed = False
         query_params = dict()
@@ -51,7 +53,8 @@ class GitlabCrawler:
                 with graph_lock:
                     if user_id not in g:
                         g.add_node(user_id, bipartite=1)
-                    g.add_edge(user_id, repo_id, **attr)
+                    if (user_id, repo_id) not in g.edges:
+                        g.add_edge(user_id, repo_id, **attr)
 
             def import_repo(repo):
                 repo_id = repo.path_with_namespace
@@ -68,19 +71,19 @@ class GitlabCrawler:
                         parent_id = d['path_with_namespace']
                         parent = repos.get(parent_id)
                         import_repo(parent)
-                        link_user(parent_id, repo.namespace['name'], relation='fork', fork_source=repo_id)
+                        link_user(parent_id, repo.namespace['name'], relation='fork', fork_source=repo_id, date=repo.created_at)
 
                 languages = repo.languages()
                 language = sorted(languages.items(), key=lambda t: t[1], reverse=True)[0][0] \
                     if len(languages) > 0 else '?'
                 weight = repo.star_count or 0
                 with graph_lock:
-                    g.add_node(repo_id, bipartite=0, language=language, weight=weight)
+                    g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.last_activity_at)
 
                 try:
                     if since is None:
                         if repo.namespace is not None:
-                            link_user(repo_id, repo.namespace['name'], relation='owner')
+                            link_user(repo_id, repo.namespace['name'], relation='owner', date=repo.created_at)
 
                         contributors = repo.repository_contributors(all=True, obey_rate_limit=False)
                         for user in contributors:
@@ -89,13 +92,18 @@ class GitlabCrawler:
                                 user_id = user['email']
                             link_user(repo_id, user_id, relation='contributor')
                     else:
-                        commits = repo.get_commits(since=since)
+                        commits = repo.commits.list(all=True, since=since, obey_rate_limit=False)
+                        commits = sorted(commits, key=lambda x: dateutil.parser.parse(x.created_at))
                         for commit in commits:
-                            link_user(repo_id, commit.author.login or commit.author.email, relation="committer")
-                except GitlabGetError:
+                            user_id = commit.author_name
+                            if not user_id or user_id.lower() == 'unknown':
+                                user_id = commit.author_email
+                            date = commit.created_at
+                            link_user(repo_id, user_id, relation="committer", date=date)
+                except GitlabError:
                     with graph_lock:
                         g.remove_node(repo_id)
-                    error: GitlabGetError
+                    error: GitlabError
                     _, error, _ = sys.exc_info()
                     if error.response_code == 429:
                         raise

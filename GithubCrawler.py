@@ -1,6 +1,7 @@
 import concurrent.futures
 import sys
 import time
+import dateutil
 from datetime import datetime
 from threading import Lock
 from urllib.error import HTTPError
@@ -28,7 +29,7 @@ class GithubCrawler:
         assert password is None or isinstance(password, str)
         assert token is None or isinstance(token, str)
 
-        self.client = Github(login_or_token=token or user, password=password, retry=5)
+        self.client = Github(login_or_token=token or user, password=password, retry=5, per_page=100)
 
     def find(self, query: str, limit: int = None, since: datetime = None, previous: nx.Graph = None):
         assert query is None or isinstance(query, str)
@@ -53,7 +54,8 @@ class GithubCrawler:
                 with graph_lock:
                     if user_id not in g:
                         g.add_node(user_id, bipartite=1)
-                    g.add_edge(user_id, repo_id, **attr)
+                    if (user_id, repo_id) not in g.edges:
+                        g.add_edge(user_id, repo_id, **attr)
 
             def import_repo(repo: Repository) -> (Repository, None):
                 repo_id = repo.full_name
@@ -66,25 +68,27 @@ class GithubCrawler:
 
                 if repo.fork and repo.parent and repo.parent.full_name and repo.owner:
                     import_repo(repo.parent)
-                    link_user(repo.parent.full_name, repo.owner.login, relation='fork', fork_source=repo_id)
+                    link_user(repo.parent.full_name, repo.owner.login, relation='fork', fork_source=repo_id, date=repo.created_at.isoformat())
 
                 language = repo.language or '?'
                 weight = repo.watchers_count or 0
                 with graph_lock:
-                    g.add_node(repo_id, bipartite=0, language=language, weight=weight)
+                    g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.created_at.isoformat())
 
                 try:
                     if since is None:
                         if repo.owner is not None:
-                            link_user(repo_id, repo.owner.login, relation='owner')
+                            link_user(repo_id, repo.owner.login, relation='owner', date=repo.pushed_at.isoformat())
 
                         contributors = repo.get_contributors()
                         for user in contributors:
                             link_user(repo_id, user.login or user.email, relation='contributor')
                     else:
-                        commits = repo.get_commits(since=since)
+                        commits = [x for x in repo.get_commits(since=since) if x.author and x.commit.author]
+                        commits = sorted(commits, key=lambda x: x.commit.author.date)
                         for commit in commits:
-                            link_user(repo_id, commit.author.login or commit.author.email, relation="committer")
+                            date: datetime = commit.commit.author.date
+                            link_user(repo_id, commit.author.login or commit.author.email, relation="committer", date=date.isoformat())
                 except RateLimitExceededException:
                     with graph_lock:
                         g.remove_node(repo_id)
