@@ -2,14 +2,13 @@ import networkx as nx
 import itertools
 import argparse
 import dateutil
-from datetime import datetime
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
-from GithubCrawler import GithubCrawler
-from GitlabCrawler import GitlabCrawler
+from reponetwork.GithubCrawler import GithubCrawler
+from reponetwork.GitlabCrawler import GitlabCrawler
 
 
 def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = False):
@@ -115,13 +114,13 @@ def draw_communities(G: nx.Graph, labels=None):
     plt.show()
 
 
-if __name__ == "__main__":
+def main():
     github_repo = ['https://www.github.com', 'www.github.com', 'github.com']
 
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
     parser.add_argument('--stats', type=int, help='Specify the amount of results to display in graph analysis. '
-                                        'Use 0 to disable graph analysis.')
+                                                  'Use 0 to disable graph analysis.')
     parser.add_argument('--draw', dest='draw', action='store_true', help='Draw the resulting graph.')
     parser.add_argument('-s', '--source', default=github_repo[0],
                         help='The URL of the repository.')
@@ -150,9 +149,10 @@ if __name__ == "__main__":
         if args.since:
             nodes = g.nodes(data=True)
             edges = g.edges(data=True)
-            g.remove_edges_from([(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
-            g.remove_nodes_from([n for n, d in nodes.items() if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
-
+            g.remove_edges_from(
+                [(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+            g.remove_nodes_from(
+                [n for n, d in nodes.items() if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
 
     if args.query:
         for g in c.find(args.query, limit=args.limit, since=args.since, previous=g):
@@ -161,3 +161,7 @@ if __name__ == "__main__":
             analize_graph(g, limit=args.stats, draw=args.draw)
     else:
         analize_graph(g, limit=args.stats, draw=args.draw)
+
+
+if __name__ == "__main__":
+    main()
