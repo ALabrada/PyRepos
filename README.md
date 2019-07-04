@@ -7,7 +7,7 @@ GitHub and GitLab.
 Use the package manager [pip](https://pip.pypa.io/en/stable/) to install RepoNetwork.
 
 ```bash
-python -m pip install reponetwork
+pip install reponetwork
 ```
 
 ## Usage
@@ -17,7 +17,7 @@ You can execute the script from the command line or import the package in python
 ### Examples
 
 ```bash
-python -m reponet -t MY_AUTH_TOKEN -q MVC -o path/to/file.gexf
+reponet -t MY_AUTH_TOKEN -q MVC -o path/to/file.gexf
 ```
 
 Build the network of repositories in Github related to MVC and save the resulting graph in your computer at the 
@@ -26,7 +26,7 @@ Authentication is not required, but encouraged as it allows performing more API 
 See [Gihub rate limit](https://developer.github.com/v3/#rate-limiting).
 
 ```bash
-python -m reponet -s https://gitlab.com/ -t MY_AUTH_TOKEN -q MVC --stats 1
+reponet -s https://gitlab.com/ -t MY_AUTH_TOKEN -q MVC --stats 1
 ```
 
 Build the network of repositories in the main [GitLab](https://gitlab.com/) server related to MVC and analyze 
@@ -35,7 +35,7 @@ private token from your GitLab account. Authentication is not required, but enco
 enough information in un-authenticated queries and thus, the resulting network may be incomplete. 
 
 ```bash
-python -m reponet -u USER_NAME -p PASSWORD -q MVC -o path/to/file.gexf --stats 1 --draw --since 2015-01-01
+reponet -u USER_NAME -p PASSWORD -q MVC -o path/to/file.gexf --stats 1 --draw --since 2015-01-01
 ```
 
 Build the network of repositories in Github server related to MVC and then analyse, draw and save the resulting graphs. 
@@ -44,7 +44,7 @@ since the beginning of 2015. The graph will be saved and analysed after exceedin
 stop the process without loosing information.
 
 ```bash
-python -m reponet -i path/to/file.gexf --stats 1 --draw --since 2015-01-01
+reponet -i path/to/file.gexf --stats 1 --draw --since 2015-01-01
 ```
 
 Load a previously saved network graph and then analyse and draw a visual representation of it. 

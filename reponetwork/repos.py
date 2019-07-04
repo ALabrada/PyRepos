@@ -108,9 +108,13 @@ def draw_communities(G: nx.Graph, labels=None):
     size_list = [2 if d['bipartite'] else 6 for n, d in nodes]
 
     fig, ax = plt.subplots(figsize=(16, 9))
+    ax.plot([0], [0], color='0.3', label='User')
+    for l, i in languages.items():
+        ax.plot([0], [0], color=cm.jet(norm(i)), label=l)
     plt.title("Github repositories")
     nx.draw_networkx(G, pos=pos, nodelist=node_list, node_color=color_list, node_size=size_list,
                      with_labels=True, labels=labels, ax=ax, edge_color='0.7')
+    plt.legend()
     plt.show()
 
 
@@ -152,15 +156,18 @@ def main():
             g.remove_edges_from(
                 [(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
             g.remove_nodes_from(
-                [n for n, d in nodes.items() if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+                [n for n, d in nodes if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
 
     if args.query:
         for g in c.find(args.query, limit=args.limit, since=args.since, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
+                print('Saved to {0}'.format(args.output))
             analize_graph(g, limit=args.stats, draw=args.draw)
-    else:
+    elif g:
         analize_graph(g, limit=args.stats, draw=args.draw)
+    else:
+        print('Nothing to analyze')
 
 
 if __name__ == "__main__":
