@@ -3,7 +3,7 @@ import itertools
 import argparse
 import dateutil
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('WXAgg')
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
