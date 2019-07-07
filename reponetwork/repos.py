@@ -1,4 +1,5 @@
 import networkx as nx
+import networkx.algorithms.isomorphism as iso
 import itertools
 import argparse
 import dateutil
@@ -11,9 +12,10 @@ from reponetwork.GithubCrawler import GithubCrawler
 from reponetwork.GitlabCrawler import GitlabCrawler
 
 
-def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = False):
+def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = False, cmp_with: nx.Graph = None):
     assert isinstance(g, nx.Graph)
     assert isinstance(limit, int)
+    assert cmp_with is None or isinstance(cmp_with, nx.Graph)
 
     def take_by_value(items, l, f=None):
         items = sorted(items, key=lambda t: t[1], reverse=True)
@@ -41,6 +43,14 @@ def analize_graph(g: nx.Graph, limit: int = 3, clean: bool = True, draw: bool = 
     print('Number of risked projects: \n{0}'.format(len(deg1_repos)))
     deg1_repos = sorted(deg1_repos, key=lambda n: -nodes[n].get('weight', 0))
     print('Most risked projects: \n{0}'.format(deg1_repos[0:limit]))
+
+    if cmp_with:
+        print('Comparing graphs...')
+        nm = iso.categorical_node_match(['bipartite', 'language'], [0, '?'])
+        em = iso.categorical_edge_match('relation', 'contributor')
+        #are_equal = nx.is_isomorphic(g, cmp_with, node_match=nm, edge_match=em)
+        are_equal = nx.could_be_isomorphic(g, cmp_with)
+        print('The graphs are similar.' if are_equal else 'The graphs are not isomorphic.')
 
     if clean:
         repo_count = len(repos)
@@ -123,8 +133,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='Analyze the network of code projects in a code repository.')
     parser.add_argument('-i', '--input', help='Path of a previously saved graph in GEXF format.')
-    parser.add_argument('--stats', type=int, help='Specify the amount of results to display in graph analysis. '
-                                                  'Use 0 to disable graph analysis.')
+    parser.add_argument('--stats', type=int, default=0, help='Specify the amount of results to display in graph analysis. '
+                                                        'Use 0 to disable graph analysis.')
     parser.add_argument('--draw', dest='draw', action='store_true', help='Draw the resulting graph.')
     parser.add_argument('-s', '--source', default=github_repo[0],
                         help='The URL of the repository.')
@@ -140,6 +150,7 @@ def main():
     parser.add_argument('--since', type=lambda s: dateutil.parser.parse(s),
                         help='Starting date.')
     parser.add_argument('-o', '--output', help='Specify a path to save the resulting graph in GEXF format.')
+    parser.add_argument('--compare', help='Path of another graph in GEXF format to compare with.')
     args = parser.parse_args()
 
     if args.source.lower() in github_repo:
@@ -148,6 +159,7 @@ def main():
         c = GitlabCrawler(args.source, token=args.token, user=args.user, password=args.password)
 
     g: nx.Graph = None
+    g2: nx.Graph = None
     if args.input:
         g = nx.read_gexf(args.input)
         if args.since:
@@ -157,15 +169,17 @@ def main():
                 [(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
             g.remove_nodes_from(
                 [n for n, d in nodes if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+    if args.compare:
+        g2 = nx.read_gexf(args.compare)
 
     if args.query:
         for g in c.find(args.query, limit=args.limit, since=args.since, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)
                 print('Saved to {0}'.format(args.output))
-            analize_graph(g, limit=args.stats, draw=args.draw)
+            analize_graph(g, limit=args.stats, draw=args.draw, cmp_with=g2)
     elif g:
-        analize_graph(g, limit=args.stats, draw=args.draw)
+        analize_graph(g, limit=args.stats, draw=args.draw, cmp_with=g2)
     else:
         print('Nothing to analyze')
 

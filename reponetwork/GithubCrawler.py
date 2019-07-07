@@ -14,10 +14,11 @@ def wait_for_reset(client: Github):
     available, _ = client.rate_limiting
     timestamp = client.rate_limiting_resettime
     if timestamp and available == 0:
+        print('Waiting for rate limit reset...')
         t = timestamp - time.time()
         while t > 0:
             mins, secs = divmod(t, 60)
-            time_format = 'Waiting {:02.0f}:{:02.0f}'.format(mins, secs)
+            time_format = 'Remaining {:02.0f}:{:02.0f}'.format(mins, secs)
             print(time_format, end='\r')
             time.sleep(1)
             t = timestamp - time.time()
