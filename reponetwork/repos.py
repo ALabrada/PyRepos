@@ -3,7 +3,7 @@ import itertools
 import argparse
 import dateutil
 import matplotlib
-matplotlib.use('WXAgg')
+#matplotlib.use('WXAgg')
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 
@@ -134,7 +134,7 @@ def main():
                                                  'Login is not usually required but can offer advantages.')
     parser.add_argument('-t', '--token', help='Your private token for authentication. '
                                               'Login is not usually required but can offer advantages.')
-    parser.add_argument('-l', '--limit', type=int, default=1000,
+    parser.add_argument('-l', '--limit', type=int, default=1000000,
                         help='The maximum number of repositories to include in the graph.')
     parser.add_argument('-q', '--query', help='Search the projects that match the specified text.')
     parser.add_argument('--since', type=lambda s: dateutil.parser.parse(s),

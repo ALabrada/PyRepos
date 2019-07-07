@@ -57,14 +57,14 @@ class GithubCrawler:
                     if (user_id, repo_id) not in g.edges:
                         g.add_edge(user_id, repo_id, **attr)
 
-            def import_repo(repo: Repository) -> (Repository, None):
+            def import_repo(repo: Repository):
                 repo_id = repo.full_name
                 if repo_id is None:
-                    return repo
+                    return repo, []
 
                 with graph_lock:
                     if repo_id in g:
-                        return repo
+                        return repo, []
 
                 if repo.fork and repo.parent and repo.parent.full_name and repo.owner:
                     import_repo(repo.parent)
@@ -75,6 +75,7 @@ class GithubCrawler:
                 with graph_lock:
                     g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.created_at.isoformat())
 
+                repo_forks = []
                 try:
                     if since is None:
                         if repo.owner is not None:
@@ -89,6 +90,8 @@ class GithubCrawler:
                         for commit in commits:
                             date: datetime = commit.commit.author.date
                             link_user(repo_id, commit.author.login or commit.author.email, relation="committer", date=date.isoformat())
+
+                    repo_forks = list(repo.get_forks())
                 except RateLimitExceededException:
                     with graph_lock:
                         g.remove_node(repo_id)
@@ -99,7 +102,7 @@ class GithubCrawler:
                 except Exception:
                     raise
 
-                return repo
+                return repo, repo_forks
 
             try:
                 print('Finding more repositories.')
@@ -114,11 +117,14 @@ class GithubCrawler:
                         workers = (executor.submit(import_repo, worker) for worker in page_repos)
 
                         for worker in concurrent.futures.as_completed(workers):
-                            repo: Repository = worker.result()
+                            repo: Repository
+                            repo_forks: [Repository]
+                            repo, repo_forks = worker.result()
                             if repo is not None:
                                 print('Analyzed repo {0}.'.format(repo.full_name or '?'))
                                 page_repos.remove(repo)
                                 count += 1
+                                page_repos.extend(repo_forks)
                 completed = True
 
             except HTTPError:

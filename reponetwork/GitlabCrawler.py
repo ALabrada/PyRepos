@@ -59,11 +59,11 @@ class GitlabCrawler:
             def import_repo(repo):
                 repo_id = repo.path_with_namespace
                 if repo_id is None:
-                    return repo
+                    return repo, []
 
                 with graph_lock:
                     if repo_id in g:
-                        return repo
+                        return repo, []
 
                 if 'forked_from_project' in repo.attributes:
                     d = repo.attributes['forked_from_project']
@@ -73,13 +73,14 @@ class GitlabCrawler:
                         import_repo(parent)
                         link_user(parent_id, repo.namespace['name'], relation='fork', fork_source=repo_id, date=repo.created_at)
 
-                languages = repo.languages()
+                languages = repo.languages() if hasattr(repo, 'languages') else []
                 language = sorted(languages.items(), key=lambda t: t[1], reverse=True)[0][0] \
                     if len(languages) > 0 else '?'
                 weight = repo.star_count or 0
                 with graph_lock:
                     g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.last_activity_at)
 
+                repo_forks = []
                 try:
                     if since is None:
                         if repo.namespace is not None:
@@ -100,6 +101,8 @@ class GitlabCrawler:
                                 user_id = commit.author_email
                             date = commit.created_at
                             link_user(repo_id, user_id, relation="committer", date=date)
+
+                    repo_forks = [self.client.projects.get(fork.id) for fork in repo.forks.list(all=True, obey_rate_limit=False)]
                 except GitlabError:
                     with graph_lock:
                         g.remove_node(repo_id)
@@ -110,7 +113,7 @@ class GitlabCrawler:
                 except Exception:
                     raise
 
-                return repo
+                return repo, repo_forks
 
             try:
                 print('Finding more repositories.')
@@ -127,11 +130,12 @@ class GitlabCrawler:
                         workers = (executor.submit(import_repo, worker) for worker in page_repos)
 
                         for worker in concurrent.futures.as_completed(workers):
-                            repo = worker.result()
+                            repo, repo_forks = worker.result()
                             if repo is not None:
                                 print('Analyzed repo {0}.'.format(repo.path_with_namespace or '?'))
                                 page_repos.remove(repo)
                                 count += 1
+                                page_repos.extend(repo_forks)
                 completed = True
 
             except HTTPError:
