@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="reponetwork",
-    version="0.3.0",
+    version="1.0.0",
     author="Alexei Labrada Tsoraeva",
     author_email="labrada.alexei@gmail.com",
     description="A network analysis tool for project repositories.",

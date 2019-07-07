@@ -162,6 +162,7 @@ def main():
     g2: nx.Graph = None
     if args.input:
         g = nx.read_gexf(args.input)
+        print('Loaded graph from {0}'.format(args.input))
         if args.since:
             nodes = g.nodes(data=True)
             edges = g.edges(data=True)
@@ -169,10 +170,14 @@ def main():
                 [(e1, e2) for e1, e2, d in edges if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
             g.remove_nodes_from(
                 [n for n, d in nodes if 'date' in d and dateutil.parser.parse(d['date']) < args.since])
+            print('Excluded information prior to {0}'.format(args.since))
+
     if args.compare:
         g2 = nx.read_gexf(args.compare)
+        print('Loaded graph from {0} for comparison'.format(args.input))
 
     if args.query:
+        print('Searching for projects matching {0}'.format(args.query))
         for g in c.find(args.query, limit=args.limit, since=args.since, previous=g):
             if args.output:
                 nx.write_gexf(g, args.output)

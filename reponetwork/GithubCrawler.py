@@ -38,7 +38,6 @@ class GithubCrawler:
         assert since is None or isinstance(since, datetime)
         assert previous is None or isinstance(previous, nx.Graph)
 
-        print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
         g = previous or nx.Graph()
         graph_lock = Lock()
         completed = False
@@ -74,7 +73,7 @@ class GithubCrawler:
                 language = repo.language or '?'
                 weight = repo.watchers_count or 0
                 with graph_lock:
-                    g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.created_at.isoformat())
+                    g.add_node(repo_id, bipartite=0, language=language, weight=weight, date=repo.updated_at.isoformat())
 
                 repo_forks = []
                 try:

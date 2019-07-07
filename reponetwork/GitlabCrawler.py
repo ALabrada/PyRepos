@@ -30,7 +30,6 @@ class GitlabCrawler:
         assert since is None or isinstance(since, datetime)
         assert previous is None or isinstance(previous, nx.Graph)
 
-        print('Finding repositories with "{0}"'.format(query or "NO QUERY"))
         g = previous or nx.Graph()
         since = since.isoformat() if since else None
         graph_lock = Lock()
